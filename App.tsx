@@ -5,7 +5,8 @@ import { AuthState, Workspace, Task, TaskStatus, User, Comment, Tag, Attachment 
 import { TaskModal } from './components/TaskModal';
 import { TaskDetail } from './components/TaskDetail';
 import { WorkspaceModal } from './components/WorkspaceModal';
-import { PlusIcon, CalendarIcon, PaperclipIcon } from './components/Icons';
+import { ProfileModal } from './components/ProfileModal';
+import { PlusIcon, CalendarIcon, PaperclipIcon, SunIcon, MoonIcon, TagIcon } from './components/Icons';
 import { STATUS_CONFIG } from './constants';
 
 const App: React.FC = () => {
@@ -17,10 +18,19 @@ const App: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark' || 
+      (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  });
   
+  // Estados de Filtros
   const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [filterDueDate, setFilterDueDate] = useState<string>('');
+
   const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
   const [isWorkspaceModalOpen, setIsWorkspaceModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | undefined>(undefined);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   
@@ -32,6 +42,16 @@ const App: React.FC = () => {
   const [authEmail, setAuthEmail] = useState('');
   const [authPass, setAuthPass] = useState('');
   const [authName, setAuthName] = useState('');
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
 
   const processTasksData = useCallback((data: any[]) => {
     const formattedTasks: Task[] = (data || []).map((t: any) => ({
@@ -113,22 +133,6 @@ const App: React.FC = () => {
     }
   }, [currentWorkspace]);
 
-  useEffect(() => {
-    if (!auth.isAuthenticated || !currentWorkspace) return;
-
-    const channel = supabase.channel('db-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchTasks())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_assignees' }, () => fetchTasks())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'task_tags' }, () => fetchTasks())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => fetchTasks())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'attachments' }, () => fetchTasks())
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [auth.isAuthenticated, currentWorkspace, fetchTasks]);
-
   const handleSetSession = useCallback((session: any) => {
     const user: User = {
       id: session.user.id,
@@ -161,17 +165,51 @@ const App: React.FC = () => {
     if (auth.isAuthenticated && currentWorkspace) fetchTasks();
   }, [currentWorkspace, auth.isAuthenticated, fetchTasks]);
 
+  // LOGICA DE FILTRAGEM COMBINADA
   const filteredTasks = useMemo(() => {
-    if (selectedAssigneeIds.length === 0) return tasks;
-    return tasks.filter(task => 
-      task.assignees.some(assignee => selectedAssigneeIds.includes(assignee.id))
-    );
-  }, [tasks, selectedAssigneeIds]);
+    let result = tasks;
+
+    // Filtro por Responsável
+    if (selectedAssigneeIds.length > 0) {
+      result = result.filter(task => 
+        task.assignees.some(assignee => selectedAssigneeIds.includes(assignee.id))
+      );
+    }
+
+    // Filtro por Tags
+    if (selectedTagIds.length > 0) {
+      result = result.filter(task => 
+        task.tags.some(tag => selectedTagIds.includes(tag.id))
+      );
+    }
+
+    // Filtro por Data (Vencimento até)
+    if (filterDueDate) {
+      result = result.filter(task => {
+        if (!task.dueDate) return false;
+        return task.dueDate <= filterDueDate;
+      });
+    }
+
+    return result;
+  }, [tasks, selectedAssigneeIds, selectedTagIds, filterDueDate]);
 
   const toggleAssigneeFilter = (userId: string) => {
     setSelectedAssigneeIds(prev => 
       prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
     );
+  };
+
+  const toggleTagFilter = (tagId: string) => {
+    setSelectedTagIds(prev => 
+      prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
+    );
+  };
+
+  const clearAllFilters = () => {
+    setSelectedAssigneeIds([]);
+    setSelectedTagIds([]);
+    setFilterDueDate('');
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -199,13 +237,31 @@ const App: React.FC = () => {
 
   const handleLogout = async () => await supabase.auth.signOut();
 
+  const handleUpdateProfile = async (updatedUser: User) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ name: updatedUser.name, avatar_url: updatedUser.avatar })
+        .eq('id', updatedUser.id);
+      
+      if (error) throw error;
+      setAuth(prev => ({ ...prev, user: updatedUser }));
+      setAllProfiles(prev => prev.map(p => p.id === updatedUser.id ? updatedUser : p));
+      await supabase.auth.updateUser({
+        data: { full_name: updatedUser.name, avatar_url: updatedUser.avatar }
+      });
+      alert('Perfil atualizado com sucesso!');
+    } catch (err: any) {
+      alert(`Erro ao atualizar perfil: ${err.message}`);
+    }
+  };
+
   const handleCreateWorkspace = async (workspaceData: Omit<Workspace, 'id'>) => {
     try {
       const newId = crypto.randomUUID();
       const newWS = { id: newId, ...workspaceData };
       const { error } = await supabase.from('workspaces').insert(newWS);
       if (error) throw error;
-      
       setWorkspaces(prev => [...prev, newWS]);
       setCurrentWorkspace(newWS);
     } catch (err: any) {
@@ -213,135 +269,92 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCreateTag = async (name: string, color: string): Promise<Tag> => {
+    try {
+      const newTag = { id: crypto.randomUUID(), name, color };
+      const { error } = await supabase.from('tags').insert(newTag);
+      if (error) throw error;
+      setAvailableTags(prev => [...prev, newTag]);
+      return newTag;
+    } catch (err: any) {
+      console.error("Erro ao criar tag:", err);
+      throw err;
+    }
+  };
+
   const handleSaveTask = async (taskData: Omit<Task, 'id' | 'createdAt'>) => {
     try {
       const taskId = editingTask ? editingTask.id : crypto.randomUUID();
-      
       const payload: any = {
-        id: taskId, 
-        title: taskData.title, 
-        description: taskData.description,
-        status: taskData.status, 
-        duedate: taskData.dueDate || null,
-        created_by: auth.user?.id, 
-        workspaceid: currentWorkspace?.id
+        id: taskId, title: taskData.title, description: taskData.description,
+        status: taskData.status, duedate: taskData.dueDate || null,
+        created_by: auth.user?.id, workspaceid: currentWorkspace?.id
       };
-      
       const { error } = await supabase.from('tasks').upsert(payload);
       if (error) throw error;
       
-      const uniqueAssignees = Array.from(new Map(taskData.assignees.map(u => [u.id, u])).values());
       await supabase.from('task_assignees').delete().eq('task_id', taskId);
-      if (uniqueAssignees.length > 0) {
-        await supabase.from('task_assignees').insert(uniqueAssignees.map(u => ({ task_id: taskId, user_id: u.id })));
+      if (taskData.assignees.length > 0) {
+        await supabase.from('task_assignees').insert(taskData.assignees.map(u => ({ task_id: taskId, user_id: u.id })));
       }
-
-      const uniqueTags = Array.from(new Map(taskData.tags.map(t => [t.id, t])).values());
       await supabase.from('task_tags').delete().eq('task_id', taskId);
-      if (uniqueTags.length > 0) {
-        await supabase.from('task_tags').insert(uniqueTags.map(t => ({ task_id: taskId, tag_id: t.id })));
+      if (taskData.tags.length > 0) {
+        await supabase.from('task_tags').insert(taskData.tags.map(t => ({ task_id: taskId, tag_id: t.id })));
       }
-
       await supabase.from('attachments').delete().eq('task_id', taskId);
       if (taskData.attachments.length > 0) {
         await supabase.from('attachments').insert(taskData.attachments.map(att => ({
-          id: att.id,
-          task_id: taskId,
-          name: att.name,
-          size: att.size,
-          type: att.type,
-          url: att.url
+          id: att.id, task_id: taskId, name: att.name, size: att.size, type: att.type, url: att.url
         })));
       }
-      
       setIsTaskModalOpen(false);
       fetchTasks();
     } catch (err: any) { 
-      console.error(err);
-      alert(`Erro ao salvar tarefa: ${err.message}`); 
-      fetchTasks();
+      alert(`Erro ao salvar: ${err.message}`); 
     }
   };
 
   const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(task => 
-      task.id === taskId ? { ...task, ...updates } : task
-    ));
-
+    setTasks(prev => prev.map(task => task.id === taskId ? { ...task, ...updates } : task));
     try {
       const { assignees, tags, dueDate, workspaceId, attachments, ...directUpdates } = updates;
-
       const dbPayload: any = { ...directUpdates };
       if (dueDate !== undefined) dbPayload.duedate = dueDate;
       if (workspaceId !== undefined) dbPayload.workspaceid = workspaceId;
-
-      if (Object.keys(dbPayload).length > 0) {
-        await supabase.from('tasks').update(dbPayload).eq('id', taskId);
-      }
-
+      if (Object.keys(dbPayload).length > 0) await supabase.from('tasks').update(dbPayload).eq('id', taskId);
       if (assignees !== undefined) {
         await supabase.from('task_assignees').delete().eq('task_id', taskId);
-        if (assignees.length > 0) {
-          await supabase.from('task_assignees').insert(assignees.map(u => ({ task_id: taskId, user_id: u.id })));
-        }
+        if (assignees.length > 0) await supabase.from('task_assignees').insert(assignees.map(u => ({ task_id: taskId, user_id: u.id })));
       }
-
       if (tags !== undefined) {
         await supabase.from('task_tags').delete().eq('task_id', taskId);
-        if (tags.length > 0) {
-          await supabase.from('task_tags').insert(tags.map(t => ({ task_id: taskId, tag_id: t.id })));
-        }
-      }
-
-      if (attachments !== undefined) {
-        await supabase.from('attachments').delete().eq('task_id', taskId);
-        if (attachments.length > 0) {
-          await supabase.from('attachments').insert(attachments.map(att => ({
-            id: att.id,
-            task_id: taskId,
-            name: att.name,
-            size: att.size,
-            type: att.type,
-            url: att.url
-          })));
-        }
+        if (tags.length > 0) await supabase.from('task_tags').insert(tags.map(t => ({ task_id: taskId, tag_id: t.id })));
       }
       fetchTasks();
-    } catch (err: any) { 
-      console.error("Erro ao atualizar tarefa:", err.message);
-      fetchTasks();
-    }
+    } catch (err: any) { fetchTasks(); }
   };
 
   const handleAddComment = async (taskId: string, text: string) => {
     if (!auth.user) return;
     try {
-      await supabase.from('comments').insert({ 
-        task_id: taskId, 
-        userid: auth.user.id, 
-        text, 
-        timestamp: Date.now() 
-      });
+      await supabase.from('comments').insert({ task_id: taskId, userid: auth.user.id, text, timestamp: Date.now() });
       fetchTasks();
-    } catch (e: any) { 
-      console.error(e.message);
-      fetchTasks(); 
-    }
+    } catch (e: any) { fetchTasks(); }
   };
 
   if (loadError && auth.isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 text-center">
-          <h2 className="text-xl font-black text-gray-800 mb-2">Falha na Conexão</h2>
-          <p className="text-gray-500 text-sm mb-6">{loadError}</p>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900 p-4 transition-colors duration-300">
+        <div className="max-w-md w-full bg-white dark:bg-slate-800 rounded-3xl shadow-xl p-8 text-center border border-gray-100 dark:border-slate-700">
+          <h2 className="text-xl font-black text-gray-800 dark:text-slate-100 mb-2">Falha na Conexão</h2>
+          <p className="text-gray-500 dark:text-slate-400 text-sm mb-6">{loadError}</p>
           <button onClick={() => fetchInitialData()} className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl shadow-lg">Tentar Novamente</button>
         </div>
       </div>
     );
   }
 
-  if (isLoading && !auth.isAuthenticated) return <div className="min-h-screen flex flex-col items-center justify-center bg-white"><div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div><p className="text-gray-500 font-medium">Sincronizando...</p></div>;
+  if (isLoading && !auth.isAuthenticated) return <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-900"><div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div><p className="text-gray-500 dark:text-slate-400 font-medium">Sincronizando...</p></div>;
 
   if (!auth.isAuthenticated) {
     return (
@@ -364,8 +377,8 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-white">
-      <aside className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col">
+    <div className="flex h-screen bg-white dark:bg-slate-900 transition-colors duration-300">
+      <aside className="w-64 bg-gray-50 dark:bg-slate-950 border-r border-gray-200 dark:border-slate-800 flex flex-col transition-colors duration-300">
         <div className="p-6">
           <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">
             <div className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center text-sm shadow-inner">S</div> SyncUp
@@ -373,17 +386,17 @@ const App: React.FC = () => {
         </div>
         <nav className="flex-1 px-4 py-2 overflow-y-auto space-y-1 custom-scrollbar">
           <div className="flex items-center justify-between mb-3 px-2">
-            <div className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Workspaces</div>
+            <div className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest">Workspaces</div>
             <button 
               onClick={() => setIsWorkspaceModalOpen(true)}
-              className="text-indigo-600 hover:bg-indigo-50 p-1 rounded-md transition-colors"
+              className="text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 p-1 rounded-md transition-colors"
               title="Novo Workspace"
             >
               <PlusIcon />
             </button>
           </div>
           {workspaces.map(ws => (
-            <button key={ws.id} onClick={() => setCurrentWorkspace(ws)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${currentWorkspace?.id === ws.id ? 'bg-indigo-100 text-indigo-700 shadow-sm' : 'text-gray-500 hover:bg-gray-200/50'}`}>
+            <button key={ws.id} onClick={() => setCurrentWorkspace(ws)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all ${currentWorkspace?.id === ws.id ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 shadow-sm' : 'text-gray-500 dark:text-slate-400 hover:bg-gray-200/50 dark:hover:bg-slate-900/50'}`}>
               <div className={`w-6 h-6 rounded-lg ${ws.color} flex items-center justify-center text-[10px] text-white shadow-sm font-normal`}>
                 {ws.icon}
               </div>
@@ -391,54 +404,107 @@ const App: React.FC = () => {
             </button>
           ))}
         </nav>
-        <div className="p-4 border-t border-gray-100">
-          <div className="flex items-center gap-3 p-3 rounded-2xl bg-white border border-gray-100 shadow-sm">
-            <img src={auth.user?.avatar} className="w-9 h-9 rounded-xl border-2 border-indigo-50" alt="User" />
+        
+        <div className="px-4 py-2 border-t border-gray-100 dark:border-slate-800">
+           <button onClick={() => setIsDarkMode(!isDarkMode)} className="w-full flex items-center gap-3 p-3 rounded-2xl hover:bg-gray-100 dark:hover:bg-slate-900 transition-all text-gray-500 dark:text-slate-400">
+             <div className="w-8 h-8 rounded-xl bg-white dark:bg-slate-800 border border-gray-100 dark:border-slate-700 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-sm">
+               {isDarkMode ? <SunIcon /> : <MoonIcon />}
+             </div>
+             <span className="text-xs font-bold uppercase tracking-wider">{isDarkMode ? 'Modo Claro' : 'Modo Escuro'}</span>
+           </button>
+        </div>
+
+        <div className="p-4 border-t border-gray-100 dark:border-slate-800">
+          <div onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-3 p-3 rounded-2xl bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-800 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-800 hover:bg-indigo-50/20 cursor-pointer transition-all group">
+            <img src={auth.user?.avatar} className="w-9 h-9 rounded-xl border-2 border-indigo-50 dark:border-slate-700 group-hover:scale-110 transition-transform" alt="User" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-black text-gray-800 truncate">{auth.user?.name}</p>
-              <button onClick={handleLogout} className="text-[10px] text-red-500 font-black hover:underline">Sair</button>
+              <p className="text-xs font-black text-gray-800 dark:text-slate-200 truncate">{auth.user?.name}</p>
+              <button onClick={(e) => { e.stopPropagation(); handleLogout(); }} className="text-[10px] text-red-500 font-black hover:underline">Sair</button>
             </div>
           </div>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 px-8 border-b border-gray-200 flex items-center justify-between bg-white shadow-sm z-10">
+      <main className="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-900 transition-colors duration-300">
+        <header className="h-16 px-8 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between bg-white dark:bg-slate-900 shadow-sm z-10 transition-colors duration-300">
           <div className="flex items-center gap-4">
             <div className={`w-10 h-10 ${currentWorkspace?.color || 'bg-gray-200'} rounded-xl flex items-center justify-center text-white text-xl shadow-md`}>{currentWorkspace?.icon || '📁'}</div>
-            <h2 className="text-lg font-black text-gray-900">{currentWorkspace?.name}</h2>
+            <h2 className="text-lg font-black text-gray-900 dark:text-slate-100">{currentWorkspace?.name}</h2>
           </div>
-          <button onClick={() => { setEditingTask(undefined); setIsTaskModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg shadow-indigo-100">Nova Tarefa</button>
+          <button onClick={() => { setEditingTask(undefined); setIsTaskModalOpen(true); }} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-black shadow-lg shadow-indigo-100 dark:shadow-none">Nova Tarefa</button>
         </header>
 
-        <div className="px-8 py-3 bg-white border-b border-gray-100 flex items-center gap-4">
-          <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Filtros:</span>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setSelectedAssigneeIds([])} className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${selectedAssigneeIds.length === 0 ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>Tudo</button>
-            {auth.user && (
-              <button onClick={() => setSelectedAssigneeIds([auth.user!.id])} className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${selectedAssigneeIds.length === 1 && selectedAssigneeIds.includes(auth.user.id) ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>Minhas Tarefas</button>
+        {/* BARRA DE FILTROS AVANÇADA */}
+        <div className="px-8 py-4 bg-white dark:bg-slate-900 border-b border-gray-100 dark:border-slate-800 flex flex-col gap-4 transition-colors duration-300">
+          {/* Linha 1: Responsáveis e Mestre */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <span className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest">Responsáveis:</span>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelectedAssigneeIds([])} className={`px-3 py-1 rounded-full text-[10px] font-bold transition-all ${selectedAssigneeIds.length === 0 ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-700'}`}>Tudo</button>
+                <div className="flex -space-x-1.5 overflow-hidden p-1">
+                  {allProfiles.map(profile => {
+                    const isActive = selectedAssigneeIds.includes(profile.id);
+                    return (
+                      <button key={profile.id} onClick={() => toggleAssigneeFilter(profile.id)} title={profile.name} className={`relative w-8 h-8 rounded-lg border-2 transition-all group ${isActive ? 'border-indigo-500 z-10 scale-110 shadow-lg' : 'border-white dark:border-slate-900 hover:z-10 hover:scale-105'}`}>
+                        <img src={profile.avatar} className="w-full h-full rounded-[6px] object-cover" alt={profile.name} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {(selectedAssigneeIds.length > 0 || selectedTagIds.length > 0 || filterDueDate) && (
+              <button onClick={clearAllFilters} className="text-[10px] font-black text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 px-3 py-1.5 rounded-xl transition-all border border-red-100 dark:border-red-900/30">LIMPAR FILTROS</button>
             )}
-            <div className="w-px h-4 bg-gray-200 mx-2"></div>
-            <div className="flex -space-x-1.5 overflow-hidden p-1">
-              {allProfiles.map(profile => {
-                const isActive = selectedAssigneeIds.includes(profile.id);
-                return (
-                  <button key={profile.id} onClick={() => toggleAssigneeFilter(profile.id)} title={profile.name} className={`relative w-8 h-8 rounded-lg border-2 transition-all group ${isActive ? 'border-indigo-500 z-10 scale-110 shadow-lg' : 'border-white hover:z-10 hover:scale-105'}`}>
-                    <img src={profile.avatar} className="w-full h-full rounded-[6px] object-cover" alt={profile.name} />
-                  </button>
-                );
-              })}
+          </div>
+
+          {/* Linha 2: Tags e Data */}
+          <div className="flex flex-wrap items-center gap-8">
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1"><TagIcon /> Tags:</span>
+              <div className="flex flex-wrap gap-2">
+                {availableTags.map(tag => {
+                  const isActive = selectedTagIds.includes(tag.id);
+                  return (
+                    <button 
+                      key={tag.id} 
+                      onClick={() => toggleTagFilter(tag.id)}
+                      className={`px-3 py-1 rounded-full text-[9px] font-black transition-all border-2 ${isActive ? `${tag.color} text-white border-white dark:border-slate-800 shadow-md scale-105` : `bg-white dark:bg-slate-800 border-gray-100 dark:border-slate-700 text-gray-400 dark:text-slate-500 hover:border-indigo-200`}`}
+                    >
+                      {tag.name.toUpperCase()}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1"><CalendarIcon /> Vencimento até:</span>
+              <div className="relative group">
+                <input 
+                  type="date" 
+                  value={filterDueDate}
+                  onChange={(e) => setFilterDueDate(e.target.value)}
+                  className="bg-gray-100 dark:bg-slate-800 border-none rounded-xl px-4 py-1.5 text-[10px] font-black text-gray-700 dark:text-slate-200 outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer"
+                />
+                {filterDueDate && (
+                  <button onClick={() => setFilterDueDate('')} className="absolute -right-2 -top-2 w-5 h-5 bg-white dark:bg-slate-700 rounded-full shadow-md text-gray-400 flex items-center justify-center text-xs font-black hover:text-red-500 transition-colors">×</button>
+                )}
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-x-auto px-8 py-6 flex bg-gray-50/50 custom-scrollbar">
+        <div className="flex-1 overflow-x-auto px-8 py-6 flex bg-gray-50/50 dark:bg-slate-900/50 custom-scrollbar transition-colors duration-300">
           {Object.values(TaskStatus).map((status, index) => {
             const isLast = index === Object.values(TaskStatus).length - 1;
+            const columnTasks = filteredTasks.filter(t => t.status === status);
             return (
               <div 
                 key={status} 
-                className={`w-80 flex-shrink-0 flex flex-col ${!isLast ? 'border-r-2 border-dashed border-gray-200 pr-6 mr-6' : ''}`}
+                className={`w-80 flex-shrink-0 flex flex-col ${!isLast ? 'border-r-2 border-dashed border-gray-200 dark:border-slate-800 pr-6 mr-6' : ''}`}
                 onDragOver={(e) => e.preventDefault()} 
                 onDrop={(e) => {
                   e.preventDefault();
@@ -448,11 +514,11 @@ const App: React.FC = () => {
               >
                 <div className="flex items-center gap-2 mb-6 px-2">
                   <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${STATUS_CONFIG[status].color}`}>{STATUS_CONFIG[status].label}</span>
-                  <span className="text-xs font-black text-gray-300 ml-auto">{filteredTasks.filter(t => t.status === status).length}</span>
+                  <span className="text-xs font-black text-gray-300 dark:text-slate-600 ml-auto">{columnTasks.length}</span>
                 </div>
                 <div className="flex-1 space-y-4 p-2 rounded-3xl border-2 border-transparent">
-                  {filteredTasks.filter(t => t.status === status).map(task => (
-                    <div key={task.id} draggable onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} onClick={() => setSelectedTaskId(task.id)} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 cursor-pointer hover:border-indigo-400 hover:shadow-2xl transition-all">
+                  {columnTasks.map(task => (
+                    <div key={task.id} draggable onDragStart={(e) => e.dataTransfer.setData('taskId', task.id)} onClick={() => setSelectedTaskId(task.id)} className="bg-white dark:bg-slate-800 p-5 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 cursor-pointer hover:border-indigo-400 dark:hover:border-indigo-600 hover:shadow-2xl transition-all duration-300">
                       {task.tags && task.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1 mb-2">
                           {task.tags.map(tag => (
@@ -462,26 +528,25 @@ const App: React.FC = () => {
                           ))}
                         </div>
                       )}
-                      
-                      <h4 className="font-black text-gray-800 mb-3 leading-snug">{task.title}</h4>
-                      
+                      <h4 className="font-black text-gray-800 dark:text-slate-100 mb-3 leading-snug">{task.title}</h4>
                       {task.attachments && task.attachments.length > 0 && (
-                        <div className="flex items-center gap-1.5 text-gray-400 text-[10px] mb-3 bg-gray-50 w-fit px-2 py-0.5 rounded-md">
+                        <div className="flex items-center gap-1.5 text-gray-400 dark:text-slate-500 text-[10px] mb-3 bg-gray-50 dark:bg-slate-900 w-fit px-2 py-0.5 rounded-md">
                           <PaperclipIcon /> {task.attachments.length}
                         </div>
                       )}
-
-                      <div className="flex items-center justify-between pt-4 border-t border-gray-50">
+                      <div className="flex items-center justify-between pt-4 border-t border-gray-50 dark:border-slate-700">
                         <div className="flex -space-x-2">
-                          {task.assignees.map(u => <img key={u.id} src={u.avatar} className="w-7 h-7 rounded-lg border-2 border-white shadow-sm" title={u.name} alt={u.name} />)}
+                          {task.assignees.map(u => <img key={u.id} src={u.avatar} className="w-7 h-7 rounded-lg border-2 border-white dark:border-slate-800 shadow-sm" title={u.name} alt={u.name} />)}
                         </div>
-                        <div className="text-[9px] font-black text-gray-400 uppercase tracking-tighter">{task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Sem prazo'}</div>
+                        <div className={`text-[9px] font-black uppercase tracking-tighter ${task.dueDate && new Date(task.dueDate) < new Date() ? 'text-red-500' : 'text-gray-400 dark:text-slate-500'}`}>
+                          {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'Sem prazo'}
+                        </div>
                       </div>
                     </div>
                   ))}
-                  {filteredTasks.filter(t => t.status === status).length === 0 && (
-                    <div className="h-24 border-2 border-dashed border-gray-200 rounded-3xl flex items-center justify-center opacity-40">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Vazio</span>
+                  {columnTasks.length === 0 && (
+                    <div className="h-24 border-2 border-dashed border-gray-200 dark:border-slate-800 rounded-3xl flex items-center justify-center opacity-40">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-slate-600">Vazio</span>
                     </div>
                   )}
                 </div>
@@ -491,46 +556,10 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {isWorkspaceModalOpen && (
-        <WorkspaceModal 
-          onClose={() => setIsWorkspaceModalOpen(false)}
-          onSave={handleCreateWorkspace}
-        />
-      )}
-
-      {isTaskModalOpen && currentWorkspace && (
-        <TaskModal 
-          workspaceId={currentWorkspace.id} 
-          availableTags={availableTags}
-          onCreateTag={(name, color) => {
-            const newTag = { id: crypto.randomUUID(), name, color };
-            setAvailableTags(prev => [...prev, newTag]);
-            return newTag;
-          }}
-          currentUser={auth.user}
-          allProfiles={allProfiles} 
-          initialTask={editingTask}
-          onClose={() => setIsTaskModalOpen(false)} 
-          onSave={handleSaveTask}
-        />
-      )}
-
-      {activeTaskForDetail && auth.user && (
-        <TaskDetail 
-          task={activeTaskForDetail}
-          availableTags={availableTags}
-          onCreateTag={(name, color) => {
-             const newTag = { id: crypto.randomUUID(), name, color };
-             setAvailableTags(prev => [...prev, newTag]);
-             return newTag;
-          }}
-          currentUser={auth.user}
-          allProfiles={allProfiles} 
-          onClose={() => setSelectedTaskId(null)}
-          onAddComment={handleAddComment}
-          onUpdateTask={handleUpdateTask}
-        />
-      )}
+      {isWorkspaceModalOpen && <WorkspaceModal onClose={() => setIsWorkspaceModalOpen(false)} onSave={handleCreateWorkspace} />}
+      {isProfileModalOpen && auth.user && <ProfileModal user={auth.user} onClose={() => setIsProfileModalOpen(false)} onSave={handleUpdateProfile} />}
+      {isTaskModalOpen && currentWorkspace && <TaskModal workspaceId={currentWorkspace.id} availableTags={availableTags} onCreateTag={handleCreateTag} currentUser={auth.user} allProfiles={allProfiles} initialTask={editingTask} onClose={() => setIsTaskModalOpen(false)} onSave={handleSaveTask} />}
+      {activeTaskForDetail && auth.user && <TaskDetail task={activeTaskForDetail} availableTags={availableTags} onCreateTag={handleCreateTag} currentUser={auth.user} allProfiles={allProfiles} onClose={() => setSelectedTaskId(null)} onAddComment={handleAddComment} onUpdateTask={handleUpdateTask} />}
     </div>
   );
 };

@@ -6,12 +6,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SyncUp | Manage Tasks Faster</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f9fafb;
-        }
         .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
         }
@@ -21,6 +29,9 @@
         .custom-scrollbar::-webkit-scrollbar-thumb {
             background: #e5e7eb;
             border-radius: 10px;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover {
             background: #d1d5db;
@@ -40,7 +51,7 @@
 }
 </script>
 </head>
-<body>
+<body class="bg-white dark:bg-slate-900 transition-colors duration-300">
     <div id="root"></div>
 </body>
 </html>

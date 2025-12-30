@@ -1,0 +1,7 @@
+{
+  "name": "SyncUp - ClickUp Style Productivity Suite",
+  "description": "A high-performance task management application with workspaces, task assignments, and file attachments, featuring an AI-powered smart assistant.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

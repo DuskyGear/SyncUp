@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Task, User, TaskStatus, Attachment, Tag } from '../types';
-import { PlusIcon, PaperclipIcon, SparklesIcon, CheckIcon, TagIcon } from './Icons';
-import { generateTaskDescription } from '../services/geminiService';
+import { PlusIcon, PaperclipIcon, CheckIcon, TagIcon } from './Icons';
 import { uploadFileToMinio } from '../services/storageService';
 
 interface TaskModalProps {
@@ -28,7 +27,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const [dueDate, setDueDate] = useState(initialTask?.dueDate || '');
   const [attachments, setAttachments] = useState<Attachment[]>(initialTask?.attachments || []);
   const [taskTags, setTaskTags] = useState<Tag[]>(initialTask?.tags || []);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -55,7 +53,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       setIsUploading(true);
-      // Fixed: Explicitly cast Array.from(e.target.files) to File[] to avoid 'unknown' type error in map
       const filesArray = Array.from(e.target.files) as File[];
       try {
         const uploadPromises = filesArray.map(file => uploadFileToMinio(file));
@@ -87,14 +84,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
     } catch (err) {
       alert("Erro ao criar tag.");
     }
-  };
-
-  const handleSmartFill = async () => {
-    if (!title) return;
-    setIsGenerating(true);
-    const aiDesc = await generateTaskDescription(title);
-    setDescription(aiDesc);
-    setIsGenerating(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -136,9 +125,6 @@ export const TaskModal: React.FC<TaskModalProps> = ({
           <div className="space-y-3">
             <div className="flex justify-between items-center">
               <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest">Descrição</label>
-              <button type="button" onClick={handleSmartFill} disabled={isGenerating || !title} className="flex items-center gap-2 text-[10px] font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-1.5 rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all active:scale-95">
-                <SparklesIcon /> {isGenerating ? 'IA Pensando...' : 'ASSISTENTE IA'}
-              </button>
             </div>
             <textarea className="w-full px-6 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900/30 focus:bg-white dark:focus:bg-slate-800 outline-none h-32 resize-none transition-all font-medium text-gray-700 dark:text-slate-300 placeholder:text-gray-300 dark:placeholder:text-slate-600 shadow-inner" placeholder="Detalhes da tarefa..." value={description} onChange={e => setDescription(e.target.value)} />
           </div>

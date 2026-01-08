@@ -28,21 +28,21 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onSave 
       color: selectedColor,
       icon: selectedIcon
     });
-    onClose();
+    // O fechamento é controlado pelo componente pai após o sucesso
   };
 
   return (
     <div 
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div 
-        className="bg-white rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300"
+        className="bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-300"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <h2 className="text-xl font-black text-gray-800 uppercase tracking-tight">Novo Workspace</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-xl transition-all">
+        <div className="p-6 border-b border-gray-100 dark:border-slate-800 flex justify-between items-center bg-gray-50/50 dark:bg-slate-950/50">
+          <h2 className="text-xl font-black text-gray-800 dark:text-slate-100 uppercase tracking-tight">Novo Workspace</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-300 p-2 hover:bg-white dark:hover:bg-slate-800 rounded-xl transition-all">
             <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
           </button>
         </div>
@@ -50,17 +50,17 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onSave 
         <form onSubmit={handleSubmit} className="p-8 space-y-8">
           {/* Preview do Workspace */}
           <div className="flex flex-col items-center gap-4">
-            <div className={`w-20 h-20 ${selectedColor} rounded-3xl flex items-center justify-center text-4xl shadow-xl shadow-${selectedColor.split('-')[1]}-200 text-white transform transition-transform duration-500 hover:rotate-6`}>
+            <div className={`w-20 h-20 ${selectedColor} rounded-3xl flex items-center justify-center text-4xl shadow-xl shadow-${selectedColor.split('-')[1]}-200/50 text-white transform transition-transform duration-500 hover:rotate-6`}>
               {selectedIcon}
             </div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Visualização</p>
+            <p className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest">Visualização</p>
           </div>
 
           <div className="space-y-4">
-            <label className="text-xs font-black text-gray-500 uppercase tracking-widest">Nome do Espaço</label>
+            <label className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest">Nome do Espaço</label>
             <input 
               autoFocus
-              className="w-full px-5 py-4 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-4 focus:ring-indigo-100 focus:bg-white outline-none transition-all font-bold text-gray-800 placeholder:text-gray-300 shadow-inner"
+              className="w-full px-5 py-4 bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900/30 focus:bg-white dark:focus:bg-slate-800 outline-none transition-all font-bold text-gray-800 dark:text-slate-100 placeholder:text-gray-300 dark:placeholder:text-slate-600 shadow-inner"
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="Ex: Marketing, Desenvolvimento..."
@@ -69,28 +69,28 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onSave 
           </div>
 
           <div className="space-y-4">
-            <label className="text-xs font-black text-gray-500 uppercase tracking-widest">Cor de Identificação</label>
+            <label className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest">Cor de Identificação</label>
             <div className="grid grid-cols-5 gap-3">
               {COLORS.map(color => (
                 <button
                   key={color}
                   type="button"
                   onClick={() => setSelectedColor(color)}
-                  className={`h-8 rounded-lg transition-all transform hover:scale-110 ${color} ${selectedColor === color ? 'ring-4 ring-offset-2 ring-indigo-200 scale-110 shadow-lg' : 'opacity-60 hover:opacity-100'}`}
+                  className={`h-8 rounded-lg transition-all transform hover:scale-110 ${color} ${selectedColor === color ? 'ring-4 ring-offset-2 ring-indigo-200 dark:ring-indigo-800 scale-110 shadow-lg' : 'opacity-60 hover:opacity-100'}`}
                 />
               ))}
             </div>
           </div>
 
           <div className="space-y-4">
-            <label className="text-xs font-black text-gray-500 uppercase tracking-widest">Ícone</label>
+            <label className="text-xs font-black text-gray-500 dark:text-slate-400 uppercase tracking-widest">Ícone</label>
             <div className="grid grid-cols-6 gap-2">
               {ICONS.map(icon => (
                 <button
                   key={icon}
                   type="button"
                   onClick={() => setSelectedIcon(icon)}
-                  className={`h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedIcon === icon ? 'bg-indigo-50 border-2 border-indigo-200 scale-110 shadow-sm' : 'bg-gray-50 hover:bg-white border border-transparent'}`}
+                  className={`h-10 text-xl flex items-center justify-center rounded-xl transition-all ${selectedIcon === icon ? 'bg-indigo-50 dark:bg-indigo-900/30 border-2 border-indigo-200 dark:border-indigo-700 scale-110 shadow-sm' : 'bg-gray-50 dark:bg-slate-800 hover:bg-white dark:hover:bg-slate-700 border border-transparent'}`}
                 >
                   {icon}
                 </button>
@@ -102,13 +102,13 @@ export const WorkspaceModal: React.FC<WorkspaceModalProps> = ({ onClose, onSave 
             <button 
               type="button" 
               onClick={onClose} 
-              className="flex-1 py-4 text-xs font-black text-gray-400 uppercase tracking-widest hover:bg-gray-50 rounded-2xl transition-all"
+              className="flex-1 py-4 text-xs font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest hover:bg-gray-50 dark:hover:bg-slate-800 rounded-2xl transition-all"
             >
               Cancelar
             </button>
             <button 
               type="submit" 
-              className="flex-[2] py-4 bg-indigo-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all"
+              className="flex-[2] py-4 bg-indigo-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 active:scale-95 transition-all"
             >
               Criar Workspace
             </button>

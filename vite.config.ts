@@ -1,19 +1,22 @@
+
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
   define: {
+    // AWS SDK (e algumas outras libs) esperam que 'global' exista no ambiente window
     global: 'window',
   },
   resolve: {
     alias: {
-      // Garante que o AWS SDK use a versão de navegador para configuração de runtime,
-      // evitando tentativas de acesso ao sistema de arquivos (fs).
+      // Garante que o navegador não tente carregar módulos de servidor do AWS SDK
       './runtimeConfig': './runtimeConfig.browser',
+      // Mocks para módulos Node.js que não existem no navegador
+      fs: '/lib/polyfills.ts',
+      path: '/lib/polyfills.ts',
+      os: '/lib/polyfills.ts',
     },
-  },
-  optimizeDeps: {
-    exclude: ['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner'],
   },
 });

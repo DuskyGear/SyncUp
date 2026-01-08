@@ -13,7 +13,7 @@ interface TaskDetailProps {
   currentUser: User;
   allProfiles: User[];
   onClose: () => void;
-  onAddComment: (taskId: string, comment: string) => void;
+  onAddComment: (taskId: string, comment: string, attachments: Attachment[]) => void;
   onUpdateTask: (taskId: string, updates: Partial<Task>) => void;
 }
 
@@ -32,9 +32,14 @@ export const TaskDetail: React.FC<TaskDetailProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   
+  // Estado para anexos do chat
+  const [pendingChatAttachments, setPendingChatAttachments] = useState<Attachment[]>([]);
+  const [isUploadingChat, setIsUploadingChat] = useState(false);
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const tagMenuRef = useRef<HTMLDivElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
@@ -61,15 +66,36 @@ export const TaskDetail: React.FC<TaskDetailProps> = ({
 
   const handleSendComment = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!commentText.trim()) return;
-    onAddComment(task.id, commentText);
+    if (!commentText.trim() && pendingChatAttachments.length === 0) return;
+    
+    onAddComment(task.id, commentText, pendingChatAttachments);
+    
     setCommentText('');
+    setPendingChatAttachments([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendComment();
+    }
+  };
+
+  const handleChatFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setIsUploadingChat(true);
+      const filesArray = Array.from(e.target.files) as File[];
+      try {
+        const uploadPromises = filesArray.map(file => uploadFileToMinio(file));
+        const newAttachments = await Promise.all(uploadPromises);
+        setPendingChatAttachments(prev => [...prev, ...newAttachments]);
+      } catch (error: any) {
+        console.error("Erro no upload de anexo do chat:", error);
+        alert(`Falha ao anexar arquivo no chat: ${error.message}`);
+      } finally {
+        setIsUploadingChat(false);
+        if (chatFileInputRef.current) chatFileInputRef.current.value = '';
+      }
     }
   };
 
@@ -198,6 +224,28 @@ export const TaskDetail: React.FC<TaskDetailProps> = ({
     );
   };
 
+  const renderChatAttachmentPreview = (att: Attachment) => {
+    const isImg = isImage(att);
+    return (
+      <div key={att.id} onClick={() => window.open(att.url, '_blank')} className="cursor-pointer bg-gray-100 dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl overflow-hidden flex flex-col max-w-[160px] hover:border-indigo-400 transition-colors">
+        <div className="h-20 flex items-center justify-center bg-gray-200 dark:bg-slate-950 overflow-hidden relative">
+          {isImg ? (
+             <img src={att.url} className="w-full h-full object-cover" alt={att.name} />
+          ) : (
+            <div className="text-gray-400 dark:text-slate-600"><PaperclipIcon /></div>
+          )}
+          <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 hover:opacity-100">
+             <div className="bg-white/90 p-1.5 rounded-full shadow-sm text-indigo-600"><DownloadIcon /></div>
+          </div>
+        </div>
+        <div className="p-2">
+          <p className="text-[10px] font-bold text-gray-700 dark:text-slate-300 truncate">{att.name}</p>
+          <p className="text-[8px] text-gray-400 dark:text-slate-500">{formatFileSize(att.size)}</p>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-300" onClick={onClose}>
       <div className="bg-white dark:bg-slate-900 rounded-[32px] shadow-2xl w-full max-w-6xl h-[90vh] overflow-hidden flex flex-col md:flex-row animate-in slide-in-from-bottom-8 duration-500" onClick={(e) => e.stopPropagation()}>
@@ -278,11 +326,32 @@ export const TaskDetail: React.FC<TaskDetailProps> = ({
               </div>
             </div>
             <div className="space-y-4">
-              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest flex justify-between items-center">Descrição<button onClick={() => setIsEditingDesc(!isEditingDesc)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-[10px] font-black uppercase tracking-wider transition-colors">{isEditingDesc ? 'Salvar Descrição' : 'Editar'}</button></label>
+              <label className="text-[10px] font-black text-gray-400 dark:text-slate-500 uppercase tracking-widest flex justify-between items-center">
+                Descrição
+                {!isEditingDesc && (
+                  <button onClick={() => setIsEditingDesc(true)} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 text-[10px] font-black uppercase tracking-wider transition-colors">
+                    Editar
+                  </button>
+                )}
+                {isEditingDesc && <span className="text-[8px] text-gray-400 font-bold">Clique fora para salvar</span>}
+              </label>
               {isEditingDesc ? (
-                <textarea autoFocus className="w-full text-sm leading-relaxed bg-white dark:bg-slate-800 dark:text-slate-200 p-6 rounded-3xl border-2 border-indigo-100 dark:border-indigo-900/50 min-h-[180px] outline-none shadow-inner focus:border-indigo-300 dark:focus:border-indigo-700 transition-all" value={editedDesc} onChange={e => setEditedDesc(e.target.value)} onBlur={() => { onUpdateTask(task.id, { description: editedDesc }); setIsEditingDesc(false); }} />
+                <textarea 
+                  autoFocus 
+                  className="w-full text-sm leading-relaxed bg-white dark:bg-slate-800 dark:text-slate-200 p-6 rounded-3xl border-2 border-indigo-100 dark:border-indigo-900/50 min-h-[180px] outline-none shadow-inner focus:border-indigo-300 dark:focus:border-indigo-700 transition-all whitespace-pre-wrap" 
+                  value={editedDesc} 
+                  onChange={e => setEditedDesc(e.target.value)} 
+                  onBlur={() => { 
+                    if (editedDesc !== task.description) {
+                        onUpdateTask(task.id, { description: editedDesc });
+                    }
+                    setIsEditingDesc(false); 
+                  }} 
+                />
               ) : (
-                <div onClick={() => setIsEditingDesc(true)} className="text-sm leading-relaxed text-gray-800 dark:text-slate-300 bg-gray-50/40 dark:bg-slate-950/40 p-6 rounded-[24px] border border-gray-100 dark:border-slate-800 cursor-text min-h-[120px] hover:bg-gray-100/40 dark:hover:bg-slate-900/40 transition-colors">{task.description || <span className="text-gray-400 dark:text-slate-600 italic font-medium">Sem descrição detalhada.</span>}</div>
+                <div onClick={() => setIsEditingDesc(true)} className="text-sm leading-relaxed text-gray-800 dark:text-slate-300 bg-gray-50/40 dark:bg-slate-950/40 p-6 rounded-[24px] border border-gray-100 dark:border-slate-800 cursor-text min-h-[120px] hover:bg-gray-100/40 dark:hover:bg-slate-900/40 transition-colors whitespace-pre-wrap">
+                  {task.description || <span className="text-gray-400 dark:text-slate-600 italic font-medium">Sem descrição detalhada.</span>}
+                </div>
               )}
             </div>
             <div className="space-y-5">
@@ -305,16 +374,62 @@ export const TaskDetail: React.FC<TaskDetailProps> = ({
                 <img src={comment.userAvatar} className="w-8 h-8 rounded-xl flex-shrink-0 object-cover border-2 border-white dark:border-slate-800 shadow-sm" alt={comment.userName} />
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center justify-between"><span className="text-[10px] font-black text-gray-800 dark:text-slate-200">{comment.userName}</span><span className="text-[8px] font-bold text-gray-400 dark:text-slate-600">{new Date(comment.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-                  <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl rounded-tl-none shadow-sm text-[12px] text-gray-700 dark:text-slate-300 leading-relaxed border border-gray-100 dark:border-slate-700">{comment.text}</div>
+                  <div className="bg-white dark:bg-slate-800 p-4 rounded-2xl rounded-tl-none shadow-sm text-[12px] text-gray-700 dark:text-slate-300 leading-relaxed border border-gray-100 dark:border-slate-700">
+                    {comment.text && <p className="mb-2">{comment.text}</p>}
+                    {comment.attachments && comment.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-50 dark:border-slate-700">
+                        {comment.attachments.map(att => renderChatAttachmentPreview(att))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
             <div ref={chatEndRef} />
           </div>
           <div className="p-6 bg-white dark:bg-slate-900 border-t border-gray-100 dark:border-slate-800">
+            {/* Preview de arquivos pendentes no chat */}
+            {pendingChatAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-3 animate-in slide-in-from-bottom-2">
+                 {pendingChatAttachments.map(att => (
+                   <div key={att.id} className="relative group bg-gray-50 dark:bg-slate-800 p-2 rounded-xl border border-gray-200 dark:border-slate-700 flex items-center gap-2">
+                     <span className="text-[10px] font-bold text-gray-600 dark:text-slate-300 max-w-[100px] truncate">{att.name}</span>
+                     <button onClick={() => setPendingChatAttachments(prev => prev.filter(p => p.id !== att.id))} className="text-gray-400 hover:text-red-500"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+                   </div>
+                 ))}
+              </div>
+            )}
+            
             <form onSubmit={handleSendComment} className="relative group">
-              <textarea value={commentText} onChange={e => setCommentText(e.target.value)} onKeyDown={handleKeyDown} placeholder="Digite sua mensagem..." className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl px-5 py-4 text-[12px] dark:text-slate-200 font-medium outline-none focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/30 focus:bg-white dark:focus:bg-slate-800 transition-all resize-none pr-14" rows={2} />
-              <button type="submit" className="absolute right-3 bottom-3 p-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 active:scale-90 transition-all shadow-lg"><SendIcon /></button>
+              <textarea 
+                value={commentText} 
+                onChange={e => setCommentText(e.target.value)} 
+                onKeyDown={handleKeyDown} 
+                placeholder="Digite sua mensagem..." 
+                className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-100 dark:border-slate-700 rounded-2xl pl-12 pr-14 py-4 text-[12px] dark:text-slate-200 font-medium outline-none focus:ring-2 focus:ring-indigo-100 dark:focus:ring-indigo-900/30 focus:bg-white dark:focus:bg-slate-800 transition-all resize-none" 
+                rows={2} 
+              />
+              
+              {/* Botão de Anexo */}
+              <button 
+                type="button" 
+                disabled={isUploadingChat}
+                onClick={() => chatFileInputRef.current?.click()}
+                className={`absolute left-3 bottom-3 p-2 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors ${isUploadingChat ? 'animate-pulse' : ''}`}
+                title="Anexar arquivo"
+              >
+                <PaperclipIcon />
+              </button>
+              <input type="file" ref={chatFileInputRef} className="hidden" multiple onChange={handleChatFileChange} />
+
+              {/* Botão Enviar */}
+              <button 
+                type="submit" 
+                disabled={(!commentText.trim() && pendingChatAttachments.length === 0) || isUploadingChat} 
+                className="absolute right-3 bottom-3 p-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 active:scale-90 transition-all shadow-lg disabled:opacity-50 disabled:scale-100"
+              >
+                <SendIcon />
+              </button>
             </form>
           </div>
         </div>
